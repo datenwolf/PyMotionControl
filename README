@@ -1,0 +1,27 @@
+PyMotionControl
+
+Classes and modules for building motion control
+systems with Python.
+
+---
+
+PyMotionControl itself does not interface with
+actuator controllers. Instead the user of this
+library is required to derive from
+MotionControl.Axis.AxisBase and in the derived class
+interface with actuator control packages of choice.
+
+Axes are assembled into a so called "Stage". The class
+MotionControl.Stage.Stage provides general motion stage
+functionality. However one may choose to derive from it
+to form a application specific stage.
+
+---
+
+NOTE scratchpad.py:
+
+scratchpad.py is the source file where new things are
+tested and outlined, before they are moved into their
+proper module file. So all contents of it are
+work-in-progress, highly experimental and most likely
+not working in the state you see them there.
