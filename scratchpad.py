@@ -115,6 +115,8 @@ class Axis(object):
 		self.initialized = None
 		self.initiator_minus = None
 		self.initiator_plus = None
+		self.initiator_error = None
+		self.temperature_warning = None
 		self.onPosition = Signal()
 		self.onStarted = Signal()
 		self.onStopped = Signal()
@@ -122,6 +124,8 @@ class Axis(object):
 		self.onInitialized = Signal()
 		self.onInitiatorMinus = Signal()
 		self.onInitiatorPlus = Signal()
+		self.onInitiatorError = Signal()
+
 	
 	def update(self):
 		last_position = self.position
