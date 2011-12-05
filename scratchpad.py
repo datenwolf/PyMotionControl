@@ -4,9 +4,6 @@ import Queue
 import threading
 
 class Action:
-	EXECUTING = 0
-	FINISHED = 1
-	ABORTED = 2
 	def execute(self):
 		self.aborted = False
 		self.do_execute()
@@ -29,8 +26,36 @@ class Action:
 	def do_ended():
 		raise NotImplementedError
 
+class NullAction(Action):
+	def do_execute(self):
+		pass
+	
+	def do_ended(self):
+		return True
 
-class ActionMotionAbsolute(Action):
+	def do_abort(self):
+		pass
+
+class Initialize(Action):
+	def __init__(self, axes):
+		self.axes = axes
+	
+	def do_execute(self):
+		for a in self.axis:
+			a.initialize()
+	
+	def do_ended():
+		all_stopped = not (True in [axis.running for axis in self.axes])
+		if not all_stopped:
+			return False
+		self.aborted = False in [axis.initialized for axis in self.axes]
+		return True
+	
+	def do_abort():
+		for axis in self.axes:
+			axis.halt()
+
+class MotionAbsolute(Action):
 	def __init__(self, axes, target, speed = None):
 		if len(axes) != len(target):
 			raise ValueError()
@@ -48,26 +73,33 @@ class ActionMotionAbsolute(Action):
 				speed = self.speed[i]
 			axis.goto_absolute(self.target[i], speed)
 
-class ActionExecuter(object):
-	def __init__(self, action):
-		self.action = action
-	
-	def start(self):
-		import threading, weakref
-		self.running = True
-		self.worker_thread = threading.Thread(target=ActionExecuter.run, args=(weakref.proxy(self),))
-	
-	def abort(self):
-		self.running = False
-		self.worker_thread.join()
+	def do_abort(self):
+		for axis in self.axes:
+			axis.halt()
 
-	def run(self):
-		action = self.action
-		try:
-			action.execute()
-		except ReferenceError:
-			action.abort()
+	def do_ended(self):
+		return not (True in [axis.running for axis in self.axes])
 		
+
+class EmergencyStop(Action):
+	def __init__(self, axes):
+		self.axes = axes
+	
+	def do_execute(self):
+		for a in axes:
+			a.emergency_stop()
+
+	def do_ended(self):
+		return not (True in [axis.running for axis in self.axes])
+	
+	def do_abort(self):
+		pass
+
+class CycleAbort(Exception):
+	pass
+
+class CycleFinished(Exception):
+	pass
 
 class MotionControl(object):
 	def __init__(self, name):
@@ -78,10 +110,11 @@ class MotionControl(object):
 		self.on_cycle_aborted = Signal()
 
 	def __del__(self):
+		self.abort()
 
 	def start_cycle(self):
 		self.active = True
-		self.worker_thread = threading.Thread(target = MotionControl.cycle_threadfunction, name = "MotionControl.worker_thread"), args=(weakref.proxy(self),))
+		self.worker_thread = threading.Thread(target = MotionControl.cycle_worker, name = "MotionControl.worker", args=(weakref.proxy(self),))
 		self.worker_thread.daemon =True
 		self.worker_thread.start()
 		self.on_cycle_started.send()
@@ -93,14 +126,16 @@ class MotionControl(object):
 	def __del__(self):
 		self.active = False
 
-	def cycle_threadfunction(ref):
+	def cycle_worker(ref):
+		abort_action = ref.abort_action
 		try:
 			import time
 			while ref.active:
-				print self.name
-				time.sleep(1)
+				time.sleep(0.01)
 			ref.on_cycle_finished.send()
-		except:
+
+		except CycleAbort:
+			ref.abort_action.execute()
 			ref.on_cycle_aborted.send()
 
 import threading
@@ -110,17 +145,6 @@ from blinker import Signal
 
 class Constraint:
 	pass
-
-class Stage:
-	def __init__(self, axes):
-		self.axes = axes
-
-	def setTarget(self, target):
-		self.target = target
-
-	def startCycle(self):
-		for ax in self.axes:
-			pass
 
 class Axis(object):
 	def __init__(self, inverted = False, scale={}):
@@ -142,7 +166,7 @@ class Axis(object):
 		self.onInitiatorMinus = Signal()
 		self.onInitiatorPlus = Signal()
 		self.onInitiatorError = Signal()
-
+		self.onTemperatureWarning = Signal()
 	
 	def update(self):
 		last_position = self.position
@@ -151,6 +175,8 @@ class Axis(object):
 		last_initialized = self.initialized
 		last_initiator_minus = self.initiator_minus
 		last_initiator_plus = self.initiator_plus
+		last_initiator_error = self.initiator_error
+		last_temperature_warning = self.temperature_warning
 
 		self.do_update()
 
@@ -164,16 +190,22 @@ class Axis(object):
 				self.onStopped.send()
 
 		if last_initializing != self.initializing:
-			self.onInitializing.send(initializing = self.initializing)
+			self.onInitializing.send(self, initializing = self.initializing)
 
 		if last_initialized != self.initialized:
-			self.onInitialized.send(initialized = self.initialized)
+			self.onInitialized.send(self, initialized = self.initialized)
 
 		if last_initiator_minus != self.initiator_minus:
-			self.onInitiatorMinus.send(active = self.initiator_minus)
+			self.onInitiatorMinus.send(self, active = self.initiator_minus)
 
 		if last_initiator_plus != self.initiator_plus:
-			self.onInitiatorPlus.send(active = self.initiator_plus)
+			self.onInitiatorPlus.send(self, active = self.initiator_plus)
+
+		if last_initiator_error != self.initiator_error:
+			self.onInitiatorError(self, error = self.initiator_error)
+
+		if last_temperature_warning != self.temperature_warning:
+			self.onTemperatureWarning(self, warning = self.temperature_warning)
 
 	def wait_for_stop(self):
 		self.update()
@@ -218,14 +250,14 @@ class PhytronAxis(Axis):
 		self.initialized = status.initialized
 		self.initiator_minus = status.initiator_minus
 		self.initator_plus = status.initiator_plus
+		self.initiator_error = status.initiator_error
+		self.temperature_warning = status.high_temperature
 
-	def stop_sync(self):
-		self.ipcomm_axis.halt()
-		while self.ipcomm_axis.getFullStatus().running:
-			pass
+	def emergency_stop(self):
+		self.ipcomm_axis.stop()		
 
 	def initialize(self):
-		self.stop_sync()
+		self.wait_for_stop()
 		self.ipcomm_axis.setRunFrequency(self.max_run_freq)
 		if self.initiator == PhytronAxis.INITIATOR_MINUS:
 			self.ipcomm_axis.initializeMinus()
@@ -242,5 +274,5 @@ class PhytronAxis(Axis):
 if __name__ == '__main__':
 	ipcomm = Phytron.IPCOMM('/dev/ttyERDASTEP', axes=5)
 	axis = PhytronAxis(ipcomm[0])
-	action = ActionMotionAbsolute([axis,], [200000,])
+	action = MotionAbsolute([axis,], [200000,])
 
