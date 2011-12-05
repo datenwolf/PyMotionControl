@@ -30,7 +30,7 @@ class Action:
 		raise NotImplementedError
 
 
-class ActionMotion(Action):
+class ActionMotionAbsolute(Action):
 	def __init__(self, axes, target, speed = None):
 		if len(axes) != len(target):
 			raise ValueError()
@@ -38,15 +38,17 @@ class ActionMotion(Action):
 			raise ValueError()
 
 		self.axes = axes
-		self.target_position = target
-		self.motion_speed = speed
+		self.target = target
+		self.speed = speed
 
 	def do_execute(self):
-		for i, axis enumerate(self.axes):
+		for i, axis in enumerate(self.axes):
+			speed = None
 			if self.speed:
-				axis.
+				speed = self.speed[i]
+			axis.goto_absolute(self.target[i], speed)
 
-class ActionExecuter(threading.Thread)
+class ActionExecuter(object):
 	def __init__(self, action):
 		self.action = action
 	
@@ -87,6 +89,9 @@ class MotionControl(object):
 	def abort(self):
 		self.active = False
 		self.worker_thread.join()
+
+	def __del__(self):
+		self.active = False
 
 	def cycle_threadfunction(ref):
 		try:
@@ -172,20 +177,32 @@ class Axis(object):
 			self.update()
 
 	def initialize(self):
+		raise NotImplementedError()
+		"""
 		if self.running:
 			self.stop()
 			self.wait_for_stop()
 		self.do_initialize()
 		self.wait_for_stop()
+		"""
+
+	def goto_absolute(self, targeti, speed = None):
+		raise NotImplementedError()
+
+	def goto_relative(self, offset, speed = None):
+		raise NotImplementedError()
 
 class PhytronAxis(Axis):
 	INITIATOR_MINUS = 1
 	INITIATOR_PLUS  = 2
-	def __init__(self, ipcomm_axis, max_run_freq, initiator, scale, inverted = False):
+	def __init__(self, ipcomm_axis, scale=1, max_run_freq=None, initiator=INITIATOR_MINUS, inverted = False):
 		super(PhytronAxis, self).__init__()
 		self.ipcomm_axis = ipcomm_axis
+		if not max_run_freq:
+			max_run_freq = self.ipcomm_axis.getRunFrequency()
 		self.max_run_freq = max_run_freq
 		self.initiator = initiator
+		self.scale = scale if not inverted else -scale
 	
 	def do_update(self):
 		if self.running:
@@ -198,10 +215,28 @@ class PhytronAxis(Axis):
 		self.initiator_minus = status.initiator_minus
 		self.initator_plus = status.initiator_plus
 
-	def do_initialize(self):
+	def stop_sync(self):
+		self.ipcomm_axis.halt()
+		while self.ipcomm_axis.getFullStatus().running:
+			pass
+
+	def initialize(self):
+		self.stop_sync()
 		self.ipcomm_axis.setRunFrequency(self.max_run_freq)
 		if self.initiator == PhytronAxis.INITIATOR_MINUS:
 			self.ipcomm_axis.initializeMinus()
 		if self.initiator == PhytronAxis.INITIATOR_PLUS:
 			self.ipcomm_axis.initializePlus()
+
+	def goto_absolute(self, target, speed = None):
+		self.stop_sync()
+		if not speed:
+			speed = 1.
+		self.ipcomm_axis.setRunFrequency(self.max_run_freq * speed)
+		self.ipcomm_axis.gotoAbs(target * self.scale)
+
+if __name__ == '__main__':
+	ipcomm = Phytron.IPCOMM('/dev/ttyERDASTEP', axes=5)
+	axis = PhytronAxis(ipcomm[0])
+	action = ActionMotionAbsolute([axis,], [200000,])
 
