@@ -71,20 +71,37 @@ class ActionExecuter(object):
 
 class MotionControl(object):
 	def __init__(self, name):
+		import weakref, threading
 		self.name = name
+		self.on_cycle_started = Signal()
+		self.on_cycle_finished = Signal()
+		self.on_cycle_aborted = Signal()
+
+	def __del__(self):
+
+	def start_cycle(self):
 		self.active = True
-		self.worker_thread = threading.Thread(target = self.workerLoop, name = "MotionControl.worker_thread")
-		self.worker_thread.setDaemon(True)
+		self.worker_thread = threading.Thread(target = MotionControl.cycle_threadfunction, name = "MotionControl.worker_thread"), args=(weakref.proxy(self),))
+		self.worker_thread.daemon =True
 		self.worker_thread.start()
+		self.on_cycle_started.send()
+
+	def abort(self):
+		self.active = False
+		self.worker_thread.join()
 
 	def __del__(self):
 		self.active = False
 
-	def workerLoop(self):
-		import time
-		while self.active:
-			print self.name
-			time.sleep(1)
+	def cycle_threadfunction(ref):
+		try:
+			import time
+			while ref.active:
+				print self.name
+				time.sleep(1)
+			ref.on_cycle_finished.send()
+		except:
+			ref.on_cycle_aborted.send()
 
 import threading
 import rpyc
