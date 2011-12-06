@@ -14,17 +14,17 @@ class Action:
 		return do_ended()
 
 	def abort(self):
-		self.do_abort()
 		self.aborted = True
+		self.do_abort()
 	
 	def do_execute():
 		raise NotImplementedError
 
-	def do_abort():
-		raise NotImplementedError
-
 	def do_ended():
 		raise NotImplementedError
+	
+	def do_abort():
+		pass
 
 class NullAction(Action):
 	def do_execute(self):
@@ -33,18 +33,15 @@ class NullAction(Action):
 	def do_ended(self):
 		return True
 
-	def do_abort(self):
-		pass
-
-class Initialize(Action):
+class Initiate(Action):
 	def __init__(self, axes):
 		self.axes = axes
 	
 	def do_execute(self):
 		for a in self.axis:
-			a.initialize()
-	
+			a.initiate()
 	def do_ended():
+
 		all_stopped = not (True in [axis.running for axis in self.axes])
 		if not all_stopped:
 			return False
@@ -55,7 +52,7 @@ class Initialize(Action):
 		for axis in self.axes:
 			axis.halt()
 
-class MotionAbsolute(Action):
+class GotoAbsolute(Action):
 	def __init__(self, axes, target, speed = None):
 		if len(axes) != len(target):
 			raise ValueError()
@@ -92,9 +89,6 @@ class EmergencyStop(Action):
 	def do_ended(self):
 		return not (True in [axis.running for axis in self.axes])
 	
-	def do_abort(self):
-		pass
-
 class CycleAbort(Exception):
 	pass
 
@@ -102,9 +96,11 @@ class CycleFinished(Exception):
 	pass
 
 class MotionControl(object):
-	def __init__(self, name):
+	def __init__(self, axes, constraints):
+		self.axes = axes
+		self.constraints = constraints
+
 		import weakref, threading
-		self.name = name
 		self.on_cycle_started = Signal()
 		self.on_cycle_finished = Signal()
 		self.on_cycle_aborted = Signal()
@@ -112,7 +108,16 @@ class MotionControl(object):
 	def __del__(self):
 		self.abort()
 
+	def can_cycle_start(self):
+		return True # FIXME: 
+
+	def prepare_cycle(self):
+		pass
+
 	def start_cycle(self):
+		if not self.can_cycle_start()
+			return False
+		self.prepare_cycle()
 		self.active = True
 		self.worker_thread = threading.Thread(target = MotionControl.cycle_worker, name = "MotionControl.worker", args=(weakref.proxy(self),))
 		self.worker_thread.daemon =True
@@ -212,17 +217,10 @@ class Axis(object):
 		while self.running:
 			self.update()
 
-	def initialize(self):
+	def initiate(self):
 		raise NotImplementedError()
-		"""
-		if self.running:
-			self.stop()
-			self.wait_for_stop()
-		self.do_initialize()
-		self.wait_for_stop()
-		"""
 
-	def goto_absolute(self, targeti, speed = None):
+	def goto_absolute(self, target, speed = None):
 		raise NotImplementedError()
 
 	def goto_relative(self, offset, speed = None):
@@ -231,14 +229,19 @@ class Axis(object):
 class PhytronAxis(Axis):
 	INITIATOR_MINUS = 1
 	INITIATOR_PLUS  = 2
-	def __init__(self, ipcomm_axis, scale=1, max_run_freq=None, initiator=INITIATOR_MINUS, inverted = False):
+	def __init__(self, ipcomm_axis, max_run_freq=None, initiator=INITIATOR_MINUS, initiator_position = 0, inverted = False):
 		super(PhytronAxis, self).__init__()
 		self.ipcomm_axis = ipcomm_axis
 		if not max_run_freq:
 			max_run_freq = self.ipcomm_axis.getRunFrequency()
 		self.max_run_freq = max_run_freq
 		self.initiator = initiator
-		self.scale = scale if not inverted else -scale
+		self.initiator_position = initiator_position
+		self.onInitialized.connect(self.set_initator_position)
+	
+	def set_initator_position(self, sender, initialized):
+		if sender == self:
+			self.ipcomm_axis.setPosition(self.initiator_position)
 	
 	def do_update(self):
 		if self.running:
@@ -256,7 +259,8 @@ class PhytronAxis(Axis):
 	def emergency_stop(self):
 		self.ipcomm_axis.stop()		
 
-	def initialize(self):
+	def initiate(self):
+		self.ipcomm_axis.stop()
 		self.wait_for_stop()
 		self.ipcomm_axis.setRunFrequency(self.max_run_freq)
 		if self.initiator == PhytronAxis.INITIATOR_MINUS:
@@ -264,15 +268,20 @@ class PhytronAxis(Axis):
 		if self.initiator == PhytronAxis.INITIATOR_PLUS:
 			self.ipcomm_axis.initializePlus()
 
+	def set_initiator_position(self, sender, initialized):
+		if sender == self and initialized:
+			self.ipcomm_axis.setPosition(self.initiator_position)
+
 	def goto_absolute(self, target, speed = None):
-		self.stop_sync()
+		self.ipcomm_axis.stop()
+		self.wait_for_stop()
 		if not speed:
 			speed = 1.
 		self.ipcomm_axis.setRunFrequency(self.max_run_freq * speed)
-		self.ipcomm_axis.gotoAbs(target * self.scale)
+		self.ipcomm_axis.gotoAbs(target)
 
 if __name__ == '__main__':
 	ipcomm = Phytron.IPCOMM('/dev/ttyERDASTEP', axes=5)
 	axis = PhytronAxis(ipcomm[0])
 	action = MotionAbsolute([axis,], [200000,])
-
+	motctl = MotionControl([axis,])

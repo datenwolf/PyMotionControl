@@ -18,6 +18,38 @@ to form a application specific stage.
 
 ---
 
+Overview
+
+PyMotionControl forms *model* part of a Model View Controller
+(MVC) design. The "MotionControl" class provides an abstraction
+for a generic motion control stage. As such the only interface
+it exposes are function for setting a motion target position
+and starting and aborting a *cycle*.
+
+*Cycles* are sequences of "Actions", instances of classes derived
+from "AbstractAction" base class. Each action effects on all assigned
+axes simulatanously and the action queue is advaned upon successfull
+completion of the currently active action. If a action fails, the
+rest of the queue is not executed, but cleared and the
+*emergency_abort_action* executed, which usually just stops all axes,
+but may also perform a movement into a safe position.
+
+A MotionControl has a number of axes, which are instances of
+classes detived from "Axis". "Axis" abstracts a typical motion
+axis interface.
+
+To program complex action sequences, subclass from "MotionControl".
+Provide interface functions which turn a given target destination
+or ultimate action into a sequence of sub-actions, queueing them
+up in MotionControl.cycle_queue
+
+"Constraints" interface with "MotionControl": Every "MotionControl"
+instance has a set of constraints. In the most simple case just the
+axis limits. Upon setting a new target position the constraints
+are checked. Only if all constraints are met a cycle can be started.
+
+---
+
 NOTE scratchpad.py:
 
 scratchpad.py is the source file where new things are
