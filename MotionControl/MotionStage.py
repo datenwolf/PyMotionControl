@@ -5,58 +5,95 @@ class CycleAbort(Exception):
 
 class MotionStage(object):
 	def __init__(self, axes, constraints = None):
-		import Queue
+		from Action import EmergencyStop
+		from blinker import Signal
 
-		self.axes = axes
+		self.axes_idx = dict()
+		for i, axis in enumerate(axes):
+			self.axes_idx[axis] = i
+		self.axes = [axis for axis in axes]
 		self.constraints = constraints
-
-		self.action_queue = Queue.Queue()
-		self.abort_action = NullAction()
+		self.abort_action = EmergencyStop(self.axes)
 
 		self.onCycleStarted = Signal()
 		self.onCycleFinished = Signal()
 		self.onCycleAborted = Signal()
 
+		self.onDestinationChanged = Signal()
+		self.onPositionChanged = Signal()
+
+		for axis in self.axes:
+			axis.onPosition.connect(self.forward_onPosition)
+
+		self.worker_thread = None
 		self.active = False
-		self.target = None
+		self.destination = None
+		self.cycle_clear()
+
+		self.update()
 
 	def __del__(self):
 		self.abort()
 
-	def __getattr__(self, name):
-		if name == 'position':
-			return [axis.position for axis in self.axes]
+	def cycle_clear(self):
+		import Queue
+		self.action_queue = Queue.Queue()
+	
+	def cycle_add_action(self, action):
+		if not self.action_queue:
+			self.cycle_clear()
+		self.action_queue.put(action)
+
+	@property
+	def position(self):
+		return tuple([axis.position for axis in self.axes])
+
+	def forward_onPosition(self, sender, position):
+		self.onPositionChanged.send(self, axis=self.axes_idx[sender], position=position)
 
 	def update(self):
+		old_position = self.position
 		for axis in self.axes:
 			axis.update()
-
-	def set_target(self, target):
-		if isinstance(target, list):
-			if len(target) != len(self.axes):
+		if old_position != self.position:
+			self.onPositionChanged.send(self, position = self.position)
+			
+	def set_destination(self, destination):
+		current_position = self.position
+		if not self.destination:
+			self.update()
+			self.destination = current_position
+		if isinstance(destination, list) or isinstance(destination, tuple):
+			if len(destination) != len(self.axes):
 				raise ValueError
-			self.target = target
-		if isinstance(target, dict):
-			for k,v in target:
-				self.target[k] = v
-		if isinstance(target, tuple):
-			self.target[target[0]] = target[1]
+			self.destination = tuple(destination)
+		if isinstance(destination, dict):
+			new_destination = list(self.destination)
+			for k in destination:
+				new_destination[k] = destination[k]
+			self.destination = tuple(new_destination)
+
+		for i,dest in enumerate(self.destination):
+			self.onDestinationChanged.send(self, axis = i, destination = dest)
 
 		speed = None
-		current_position = self.position
 		if not None in current_position:
-			delta = [abs(a-b) for a,b in zip(target, current_position)]
+			delta = [abs(a-b) for a,b in zip(self.destination, current_position)]
 			max_delta = max(delta)
-			speed = [float(d)/float(max_delta) for d in delta]
-		self.action_queue = Queue.Queue()
-		self.action_queue.put(GotoAbsolute(self.axes, self.target, speed))
+			if max_delta > 0:
+				speed = [float(d)/float(max_delta) for d in delta]
+
+		from Action import GotoAbsolute
+
+		self.cycle_clear()
+		self.cycle_add_action(GotoAbsolute(self.axes, self.destination, speed))
 
 	def can_cycle_start(self):
 		if self.active:
 			return False
 		return True # FIXME: Add constraint tests here
 
-	def start_cycle(self):
+	def cycle_start(self):
 		import threading, weakref
 
 		if not self.can_cycle_start():
@@ -64,17 +101,16 @@ class MotionStage(object):
 
 		self.current_action = None
 		self.active = True
-		self.worker_thread = threading.Thread(target = MotionControl.cycle_worker, name = "MotionControl.worker", args=(weakref.proxy(self),))
+		self.worker_thread = threading.Thread(target = MotionStage.cycle_worker, name = "MotionControl.worker", args=(weakref.proxy(self),))
 		self.worker_thread.daemon =True
 		self.worker_thread.start()
 		self.onCycleStarted.send()
 
 	def abort(self):
+		import threading
 		self.active = False
-		self.worker_thread.join()
-
-	def __del__(self):
-		self.abort()
+		if isinstance(self.worker_thread, threading.Thread):
+			self.worker_thread.join()
 
 	def cycle_worker(ref):
 		abort_action = ref.abort_action

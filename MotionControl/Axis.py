@@ -2,6 +2,7 @@
 
 class Axis(object):
 	def __init__(self, inverted = False, scale={}):
+		from blinker import Signal
 		self.inverted = inverted
 		self.scale = scale
 		self.position = None
@@ -35,13 +36,13 @@ class Axis(object):
 		self.do_update()
 
 		if last_position != self.position:
-			self.onPosition.send(position = self.position)
+			self.onPosition.send(self, position = self.position)
 
 		if last_running != self.running:
 			if self.running:
-				self.onStarted.send()
+				self.onStarted.send(self)
 			else:
-				self.onStopped.send()
+				self.onStopped.send(self)
 
 		if last_initializing != self.initializing:
 			self.onInitializing.send(self, initializing = self.initializing)

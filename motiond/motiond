@@ -1,2 +1,46 @@
 #!/usr/bin/python2
 # -*- encoding: utf-8 -*-
+
+import Phytron
+
+import MotionControl.MotionStage, MotionControl.PhytronAxis, MotionControl.Service
+from MotionControl.MotionStage import MotionStage
+from MotionControl.PhytronAxis import PhytronAxis
+from MotionControl.Service import Service
+
+ipcomm = Phytron.IPCOMM('/dev/ttyERDASTEP', axes=4)
+
+axis_x = PhytronAxis( ipcomm[0], \
+	max_run_freq = 825, \
+	initiator = PhytronAxis.INITIATOR_PLUS, \
+	initiator_position = 221786, \
+	scale = {'mm': 8000} )
+
+axis_y = PhytronAxis( ipcomm[1], \
+	max_run_freq = 825, \
+	initiator = PhytronAxis.INITIATOR_PLUS, \
+	initiator_position = 115256, \
+	scale = {'mm': 8000} )
+
+axis_z = PhytronAxis( ipcomm[2], \
+	max_run_freq = 500, \
+	initiator = PhytronAxis.INITIATOR_PLUS, \
+# FIXME: Z zero position needs yet to be determined
+	initiator_position = 217952, \
+	scale = {'mm': 8000} )
+
+axis_phi = PhytronAxis( ipcomm[3], \
+	max_run_freq = 1000, \
+	initiator = PhytronAxis.INITIATOR_MINUS, \
+	initiator_position = -273432, \
+	scale = {'°': 1600} )
+
+stage_axes = (axis_x, axis_y, axis_z, axis_phi)
+
+Service.stage = MotionStage(stage_axes)
+
+if __name__ == "__main__":
+	from rpyc.utils.server import ThreadedServer 
+	server = ThreadedServer(Service, port = 12345)
+	server.start()
+

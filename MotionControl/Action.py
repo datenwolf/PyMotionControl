@@ -89,7 +89,7 @@ class EmergencyStop(Action):
 		self.axes = axes
 	
 	def do_execute(self):
-		for a in axes:
+		for a in self.axes:
 			a.emergency_stop()
 
 	def do_ended(self):
