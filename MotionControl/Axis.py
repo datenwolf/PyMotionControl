@@ -1,8 +1,9 @@
 # -*- coding: utf8 -*-
 
 class Axis(object):
-	def __init__(self, inverted = False, scale={}):
+	def __init__(self, limits=None, inverted = False, scale={}):
 		from blinker import Signal
+		self.limits = limits
 		self.inverted = inverted
 		self.scale = scale
 		self.position = None
@@ -71,6 +72,11 @@ class Axis(object):
 		raise NotImplementedError()
 
 	def goto_absolute(self, target, speed = None):
+		if self.limits and (target < min(self.limits) or target > max(self.limits)):
+			raise ValueError()
+		self.do_goto_absolute(target, speed)
+
+	def do_goto_absolute(self, target, speed):
 		raise NotImplementedError()
 
 	def goto_relative(self, offset, speed = None):

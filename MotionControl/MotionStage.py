@@ -20,10 +20,10 @@ class MotionStage(object):
 		self.onCycleAborted = Signal()
 
 		self.onDestinationChanged = Signal()
-		self.onPositionChanged = Signal()
 
+		self.onPositionChanged = Signal()
 		for axis in self.axes:
-			axis.onPosition.connect(self.forward_onPosition)
+			axis.onPosition.connect(self.onPosition_repeat)
 
 		self.worker_thread = None
 		self.active = False
@@ -48,15 +48,13 @@ class MotionStage(object):
 	def position(self):
 		return tuple([axis.position for axis in self.axes])
 
-	def forward_onPosition(self, sender, position):
+	def onPosition_repeat(self, sender, position):
 		self.onPositionChanged.send(self, axis=self.axes_idx[sender], position=position)
 
 	def update(self):
 		old_position = self.position
 		for axis in self.axes:
 			axis.update()
-		if old_position != self.position:
-			self.onPositionChanged.send(self, position = self.position)
 			
 	def set_destination(self, destination):
 		current_position = self.position
@@ -89,22 +87,23 @@ class MotionStage(object):
 		self.cycle_add_action(GotoAbsolute(self.axes, self.destination, speed))
 
 	def can_cycle_start(self):
-		if self.active:
-			return False
 		return True # FIXME: Add constraint tests here
 
 	def cycle_start(self):
 		import threading, weakref
 
-		if not self.can_cycle_start():
+		if self.active:
 			return False
+
+#		if not self.can_cycle_start():
+#			return False
 
 		self.current_action = None
 		self.active = True
-		self.worker_thread = threading.Thread(target = MotionStage.cycle_worker, name = "MotionControl.worker", args=(weakref.proxy(self),))
-		self.worker_thread.daemon =True
+		self.worker_thread = threading.Thread(target = MotionStage.cycleWorker, name = "MotionControl.cycleWorker", args=(weakref.proxy(self),))
+		self.worker_thread.daemon = True
 		self.worker_thread.start()
-		self.onCycleStarted.send()
+		self.onCycleStarted.send(self)
 
 	def abort(self):
 		import threading
@@ -112,7 +111,7 @@ class MotionStage(object):
 		if isinstance(self.worker_thread, threading.Thread):
 			self.worker_thread.join()
 
-	def cycle_worker(ref):
+	def cycleWorker(ref):
 		abort_action = ref.abort_action
 		try:
 			import time
@@ -136,10 +135,10 @@ class MotionStage(object):
 
 				ref.action_queue.task_done()
 
-			ref.onCycleFinished.send()
+			ref.onCycleFinished.send(ref)
 		except CycleAbort:
 			ref.abort_action.execute()
-			ref.onCycleAborted.send()
+			ref.onCycleAborted.send(ref)
 
 		finally:
 			try:
@@ -149,3 +148,12 @@ class MotionStage(object):
 			except:
 				pass
 			ref.active = False
+	
+	def reference(self):
+		from Action import Initiate, GotoAbsolute
+		self.destination = None
+		self.cycle_clear()
+		self.cycle_add_action(Initiate([self.axes[0]]))
+		self.cycle_add_action(GotoAbsolute([self.axes[0]], [0]))
+		self.cycle_start()
+	

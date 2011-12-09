@@ -1,12 +1,13 @@
 #!/usr/bin/python2
 # -*- encoding: utf-8 -*-
 
+STAGE_POSITION_STORE = '/var/lib/erdastep/laststageposition'
+
 import Phytron
 
 import MotionControl.MotionStage, MotionControl.PhytronAxis, MotionControl.Service
 from MotionControl.MotionStage import MotionStage
 from MotionControl.PhytronAxis import PhytronAxis
-from MotionControl.Service import Service
 
 ipcomm = Phytron.IPCOMM('/dev/ttyERDASTEP', axes=4)
 
@@ -14,12 +15,14 @@ axis_x = PhytronAxis( ipcomm[0], \
 	max_run_freq = 825, \
 	initiator = PhytronAxis.INITIATOR_PLUS, \
 	initiator_position = 221786, \
+	limits = (-179000, 221000), \
 	scale = {'mm': 8000} )
 
 axis_y = PhytronAxis( ipcomm[1], \
 	max_run_freq = 825, \
 	initiator = PhytronAxis.INITIATOR_PLUS, \
 	initiator_position = 115256, \
+	limits = (-285000, 115000), \
 	scale = {'mm': 8000} )
 
 axis_z = PhytronAxis( ipcomm[2], \
@@ -27,20 +30,51 @@ axis_z = PhytronAxis( ipcomm[2], \
 	initiator = PhytronAxis.INITIATOR_PLUS, \
 # FIXME: Z zero position needs yet to be determined
 	initiator_position = 217952, \
+	limits = (-183000, 217000), \
 	scale = {'mm': 8000} )
 
 axis_phi = PhytronAxis( ipcomm[3], \
 	max_run_freq = 1000, \
 	initiator = PhytronAxis.INITIATOR_MINUS, \
 	initiator_position = -273432, \
+	limits = (-273000, 271000), \
 	scale = {'°': 1600} )
 
 stage_axes = (axis_x, axis_y, axis_z, axis_phi)
 
-Service.stage = MotionStage(stage_axes)
+stage = MotionStage(stage_axes)
+
+def load_stage_position_store():
+	try:
+		position = tuple( [int(line.strip()) for line in open(STAGE_POSITION_STORE)] )
+	except:
+		return
+	for i,p in enumerate(position):
+		ipcomm[i].position = p
+
+def update_stage_position_store():
+#	try:
+		store = open(STAGE_POSITION_STORE, 'w')
+		store.writelines([str(axis.position)+'\n' for axis in ipcomm])
+		store.close()
+#	except:
+#		pass
+
+def onCycleTermination(sender):
+	update_stage_position_store()
+
+stage.onCycleFinished.connect(onCycleTermination)
+stage.onCycleAborted.connect(onCycleTermination)
 
 if __name__ == "__main__":
 	from rpyc.utils.server import ThreadedServer 
+	from MotionControl.Service import Service
+
+	load_stage_position_store()
+
+	stage.update()
+
+	Service.stage = stage
 	server = ThreadedServer(Service, port = 12345)
 	server.start()
 
