@@ -1,10 +1,9 @@
 # -*- coding: utf8 -*-
 
 class Axis(object):
-	def __init__(self, limits=None, inverted = False, scale={}):
+	def __init__(self, limits=None, scale={}):
 		from blinker import Signal
 		self.limits = limits
-		self.inverted = inverted
 		self.scale = scale
 		self.position = None
 		self.running = None
@@ -15,8 +14,7 @@ class Axis(object):
 		self.initiator_error = None
 		self.temperature_warning = None
 		self.onPosition = Signal()
-		self.onStarted = Signal()
-		self.onStopped = Signal()
+		self.onRunning = Signal()
 		self.onInitializing = Signal()
 		self.onInitialized = Signal()
 		self.onInitiatorMinus = Signal()
@@ -40,10 +38,7 @@ class Axis(object):
 			self.onPosition.send(self, position = self.position)
 
 		if last_running != self.running:
-			if self.running:
-				self.onStarted.send(self)
-			else:
-				self.onStopped.send(self)
+			self.onRunning.send(self, running = self.running)
 
 		if last_initializing != self.initializing:
 			self.onInitializing.send(self, initializing = self.initializing)

@@ -5,8 +5,8 @@ from Axis import Axis
 class PhytronAxis(Axis):
 	INITIATOR_MINUS = 1
 	INITIATOR_PLUS  = 2
-	def __init__(self, ipcomm_axis, limits=None, max_run_freq=None, initiator=INITIATOR_MINUS, initiator_position = 0, inverted = False, limited = True, scale={}):
-		super(PhytronAxis, self).__init__(limits = limits, inverted = inverted, scale = scale)
+	def __init__(self, ipcomm_axis, limits=None, max_run_freq=None, initiator=INITIATOR_MINUS, initiator_position = 0, limited = True, scale={}):
+		super(PhytronAxis, self).__init__(limits = limits, scale = scale)
 
 		self.ipcomm_axis = ipcomm_axis
 		if not max_run_freq:
